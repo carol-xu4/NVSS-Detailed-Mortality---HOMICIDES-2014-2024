@@ -4,13 +4,19 @@ pacman::p_load(tidyverse, ggthemes, readxl, data.table, gdata, ipumsr, matrixSta
 
 setwd("C:/Users/CarolXu/NVSS Homicides 2014-2024")
 
-# read in cleaned 2024 data
-homicides_2024 = read_csv("data/output/homicides_2024.csv")
+# read in joined csv
+homicides = read_csv("data/output/homicides_2014_2024.csv")
 
-nrow(homicides_2024)
+names(homicides)
 
-names(homicides_2024)
+# homicides per year
+homicides_year = homicides %>%
+    group_by(data_year) %>%
+    summarise(n = n())
 
+homicides_year
+
+# homicides by nativity
 # native vs foreign-born variable
 us_states_dc = c(
   "AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN",
@@ -20,13 +26,13 @@ us_states_dc = c(
 
 us_territories = c("PR", "VI", "GU", "AS", "MP")
 
-homicides_2024 = homicides_2024 %>%
+homicides = homicides %>%
     mutate(nativity = case_when(
         state_country_birth_recode %in% c(us_states_dc, us_territories) ~ "native",
         state_country_birth_recode %in% c("CC", "MX", "CU", "YY")       ~ "foreign",
         .default = NA_character_))
 
-nativity_2024 = homicides_2024 %>% 
+nativity = homicides_2024 %>% 
     group_by(nativity) %>%
     summarize(n = n())
 
@@ -48,3 +54,4 @@ birthplace_2024 = homicides_2024 %>%
 print(birthplace_2024)
 
 write_csv(birthplace_2024, "results/homicides_by_nativity_2024.csv")
+
