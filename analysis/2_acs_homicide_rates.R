@@ -1,6 +1,9 @@
 ## PRELIMINARIES -------------------------------------------------------------------------
 if (!require("pacman")) install.packages("pacman")
 pacman::p_load(tidyverse, ggthemes, readxl, data.table, gdata, ipumsr, matrixStats)
+conflicted::conflicts_prefer(dplyr::filter)
+conflicted::conflicts_prefer(dplyr::count)
+conflicted::conflicts_prefer(dplyr::lag)
 
 setwd("C:/Users/CarolXu/NVSS Homicides 2014-2024")
 
@@ -502,3 +505,164 @@ ggplot(stacked_rates, aes(x = data_year, y = rate, color = nativity, linetype = 
     panel.background = element_rect(fill = "white", color = NA))
 
 ggsave("results/fig.7_homicide_rate_by_nativity_crude_vs_adjusted_2014_2024.png", width = 15, height = 10)
+
+# rates by age
+age_specific_rates_birthplace = homicides_age_birthplace %>%
+    left_join(
+        acs_age_birthplace,
+        by = c("data_year" = "year", "birthplace_group", "age_recode12" = "age_group")) %>%
+    mutate(
+        rate_i = n / pop * 100000,
+        weight = standard_weights[age_recode12],
+        weighted_rate = rate_i * weight)
+
+print(age_specific_rates_birthplace, n = Inf)
+
+age_specific_rates_pooled = homicides %>%
+    filter(!is.na(nativity), age_recode12 != "12") %>%
+    group_by(nativity, age_recode12) %>%
+    summarize(n = n(), .groups = "drop") %>%
+    left_join(
+        acs %>%
+            filter(!is.na(nativity), !is.na(age_group)) %>%
+            group_by(nativity, age_group) %>%
+            summarize(pop = sum(perwt), .groups = "drop"),
+        by = c("nativity", "age_recode12" = "age_group")) %>%
+    mutate(
+        rate = n / pop * 100000,
+        age_group_label = age_group_labels[age_recode12])
+
+age_specific_rates_wide = age_specific_rates_pooled %>%
+    select(age_recode12, age_group_label, nativity, rate) %>%
+    pivot_wider(names_from = nativity, values_from = rate) %>%
+    arrange(age_recode12)
+
+print(age_specific_rates_wide, n = Inf)
+
+write_csv(age_specific_rates_wide, "results/age_specific_homicide_rates_native_vs_foreign_pooled_2014_2024.csv")
+
+age_specific_rates_pooled = age_specific_rates_pooled %>%
+    mutate(age_group_label = factor(age_group_label, levels = age_group_labels))
+
+ggplot(age_specific_rates_pooled, aes(x = age_group_label, y = rate, color = nativity, group = nativity)) +
+  geom_line(linewidth = 1.8) +
+  geom_point(size = 3) +
+  scale_color_manual(values = colors_2) +
+  scale_y_continuous(expand = c(0.02, 0), limits = c(0, NA), breaks = seq(0, 14, by = 2)) +
+  labs(
+    title = "Homicide Rate by Age and Nativity, 2014-2024",
+    subtitle = "Pooled homicide deaths per 100,000 population \n Resident deaths, 50 states and DC",
+    x = NULL,
+    y = NULL,
+    color = NULL,
+    caption = "Source: NCHS restricted-use mortality files; ACS via IPUMS") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 30, face = "bold", hjust = 0, color = "black"),
+    plot.subtitle = element_text(size = 20, color = "gray40", hjust = 0, margin = margin(b = 12)),
+    legend.position = "top",
+    legend.justification = "left",
+    legend.text = element_text(size = 20),
+    legend.key.width = unit(1.5, "cm"),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "gray90", linewidth = 0.5),
+    panel.grid.minor.y = element_blank(),
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x = element_text(size = 16, color = "gray40", angle = 30, hjust = 1),
+    axis.text.y = element_text(size = 25, color = "gray40"),
+    plot.caption = element_text(size = 12, color = "gray40", hjust = 0),
+    plot.caption.position = "plot",
+    plot.title.position = "plot",
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA))
+
+ggsave("results/fig.8_homicide_rate_by_age_and_nativity_pooled_2014_2024.png", width = 15, height = 10)
+
+# rest of world bucket -- race/ethnicity breakdown
+rest_of_world_race = homicides %>%
+    filter(birthplace_group == "Rest of world") %>%
+    mutate(race_group = case_when(
+        race_recode40 == "01" ~ "White",
+        race_recode40 == "02" ~ "Black",
+        race_recode40 == "03" ~ "AIAN",
+        race_recode40 == "04" ~ "Asian Indian",
+        race_recode40 == "05" ~ "Chinese",
+        race_recode40 == "06" ~ "Filipino",
+        race_recode40 == "07" ~ "Japanese",
+        race_recode40 == "08" ~ "Korean",
+        race_recode40 == "09" ~ "Vietnamese",
+        race_recode40 == "10" ~ "Other or Multiple Asian",
+        race_recode40 %in% c("11","12","13","14") ~ "Pacific Islander",
+        race_recode40 >= "15" ~ "More than one race",
+        .default = NA_character_)) %>%
+    count(race_group, sort = TRUE)
+
+print(rest_of_world_race)
+
+rest_of_world_ethnicity = homicides %>%
+    filter(birthplace_group == "Rest of world") %>%
+    mutate(
+        hispanic_origin_num = as.integer(hispanic_origin),
+        ethnicity_group = case_when(
+            hispanic_origin_num %in% 100:199 ~ "Non-Hispanic",
+            hispanic_origin_num %in% 200:209 ~ "Spaniard",
+            hispanic_origin_num %in% 210:219 ~ "Mexican",
+            hispanic_origin_num %in% 220:230 ~ "Central American",
+            hispanic_origin_num %in% 231:249 ~ "South American",
+            hispanic_origin_num %in% 250:259 ~ "Latin American",
+            hispanic_origin_num %in% 260:269 ~ "Puerto Rican",
+            hispanic_origin_num %in% 270:274 ~ "Cuban",
+            hispanic_origin_num %in% 275:279 ~ "Dominican",
+            hispanic_origin_num %in% 280:299 ~ "Other Hispanic",
+            hispanic_origin_num %in% 996:999 ~ "Unknown",
+            .default = NA_character_)) %>%
+    count(ethnicity_group, sort = TRUE)
+
+print(rest_of_world_ethnicity)
+
+# smell check: race breakdown by foreign birthplace subgroup 
+foreign_race_breakdown = homicides %>%
+    filter(birthplace_group %in% c("Canada", "Mexico", "Cuba", "Rest of world")) %>%
+    mutate(race_group = case_when(
+        race_recode40 == "01" ~ "White",
+        race_recode40 == "02" ~ "Black",
+        race_recode40 == "03" ~ "AIAN",
+        race_recode40 == "04" ~ "Asian Indian",
+        race_recode40 == "05" ~ "Chinese",
+        race_recode40 == "06" ~ "Filipino",
+        race_recode40 == "07" ~ "Japanese",
+        race_recode40 == "08" ~ "Korean",
+        race_recode40 == "09" ~ "Vietnamese",
+        race_recode40 == "10" ~ "Other or Multiple Asian",
+        race_recode40 %in% c("11","12","13","14") ~ "Pacific Islander",
+        race_recode40 >= "15" ~ "More than one race",
+        .default = NA_character_)) %>%
+    count(birthplace_group, race_group) %>%
+    arrange(birthplace_group, desc(n))
+
+print(foreign_race_breakdown, n = Inf)
+
+# smell check: hispanic-origin ethnicity breakdown by foreign birthplace subgroup 
+foreign_ethnicity_breakdown = homicides %>%
+    filter(birthplace_group %in% c("Canada", "Mexico", "Cuba", "Rest of world")) %>%
+    mutate(
+        hispanic_origin_num = as.integer(hispanic_origin),
+        ethnicity_group = case_when(
+            hispanic_origin_num %in% 100:199 ~ "Non-Hispanic",
+            hispanic_origin_num %in% 200:209 ~ "Spaniard",
+            hispanic_origin_num %in% 210:219 ~ "Mexican",
+            hispanic_origin_num %in% 220:230 ~ "Central American",
+            hispanic_origin_num %in% 231:249 ~ "South American",
+            hispanic_origin_num %in% 250:259 ~ "Latin American",
+            hispanic_origin_num %in% 260:269 ~ "Puerto Rican",
+            hispanic_origin_num %in% 270:274 ~ "Cuban",
+            hispanic_origin_num %in% 275:279 ~ "Dominican",
+            hispanic_origin_num %in% 280:299 ~ "Other Hispanic",
+            hispanic_origin_num %in% 996:999 ~ "Unknown",
+            .default = NA_character_)) %>%
+    count(birthplace_group, ethnicity_group) %>%
+    arrange(birthplace_group, desc(n))
+
+print(foreign_ethnicity_breakdown, n = Inf)
