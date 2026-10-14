@@ -93,7 +93,7 @@ birthplace = homicides %>%
     group_by(data_year, birthplace_group) %>%
     summarize(n = n())
 
-print(birthplace)
+print(birthplace, n = Inf)
 
 write_csv(birthplace, "results/homicides_by_nativity_2024.csv")
 
@@ -163,14 +163,18 @@ ggplot(foreign_plot_data, aes(x = data_year, y = n, color = birthplace_group, li
 ggsave("results/fig.2_foreign_homicides_year.png", width = 15, height = 10)
 
 # 2024 homicides by state (smell check w NCHS)
+# by state occurence
 homicides %>%
     filter(data_year == 2024) %>%
     group_by(state_occ_fips) %>%
     summarise(n = n()) %>%
     print(n = Inf)
 
+# by state residence 
+# this is the one to use
 homicides %>%
     filter(data_year == 2024) %>%
     group_by(state_res_fips) %>%
     summarise(n = n()) %>%
     print(n = Inf)
+

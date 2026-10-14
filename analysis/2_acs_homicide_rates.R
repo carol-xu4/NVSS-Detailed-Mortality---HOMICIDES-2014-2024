@@ -1061,3 +1061,176 @@ state_rates_2014_2024 = crude_state_year_total %>%
 print(state_rates_2014_2024, n = Inf)
 
 write_csv(state_rates_2014_2024, "results/state_rates_all_2014_2024.csv")
+
+# rates by age gorup, 2024 only
+age_specific_rates_pooled_2024 = homicides %>%
+    filter(!is.na(nativity), age_recode12 != "12", data_year == 2024) %>%
+    group_by(nativity, age_recode12) %>%
+    summarize(n = n(), .groups = "drop") %>%
+    left_join(
+        acs %>%
+            filter(!is.na(nativity), !is.na(age_group), year == 2024) %>%
+            group_by(nativity, age_group) %>%
+            summarize(pop = sum(perwt), .groups = "drop"),
+        by = c("nativity", "age_recode12" = "age_group")) %>%
+    mutate(
+        rate = n / pop * 100000,
+        age_group_label = age_group_labels[age_recode12])
+
+age_specific_rates_wide_2024 = age_specific_rates_pooled_2024 %>%
+    select(age_recode12, age_group_label, nativity, rate) %>%
+    pivot_wider(names_from = nativity, values_from = rate) %>%
+    arrange(age_recode12)
+
+print(age_specific_rates_wide_2024, n = Inf)
+
+write_csv(age_specific_rates_wide_2024, "results/age_specific_homicide_rates_native_vs_foreign_2024.csv")
+
+age_specific_rates_pooled_2024 = age_specific_rates_pooled_2024 %>%
+    mutate(age_group_label = factor(age_group_label, levels = age_group_labels))
+
+ggplot(age_specific_rates_pooled_2024, aes(x = age_group_label, y = rate, color = nativity, group = nativity)) +
+  geom_line(linewidth = 1.8) +
+  geom_point(size = 3) +
+  scale_color_manual(values = colors_2) +
+  scale_y_continuous(expand = c(0.02, 0), limits = c(0, NA), breaks = seq(0, 14, by = 2)) +
+  labs(
+    title = "Homicide Rate by Age and Nativity, 2024",
+    subtitle = "Homicide deaths per 100,000 population \n Resident deaths, 50 states and DC",
+    x = NULL,
+    y = NULL,
+    color = NULL,
+    caption = "Source: NCHS restricted-use mortality files; ACS via IPUMS") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 30, face = "bold", hjust = 0, color = "black"),
+    plot.subtitle = element_text(size = 20, color = "gray40", hjust = 0, margin = margin(b = 12)),
+    legend.position = "top",
+    legend.justification = "left",
+    legend.text = element_text(size = 20),
+    legend.key.width = unit(1.5, "cm"),
+    panel.grid.major.x = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.y = element_line(color = "gray90", linewidth = 0.5),
+    panel.grid.minor.y = element_blank(),
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x = element_text(size = 16, color = "gray40", angle = 30, hjust = 1),
+    axis.text.y = element_text(size = 25, color = "gray40"),
+    plot.caption = element_text(size = 12, color = "gray40", hjust = 0),
+    plot.caption.position = "plot",
+    plot.title.position = "plot",
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA))
+
+ggsave("results/fig.22_homicide_rate_age_2024.png", width = 15, height = 10)
+
+# same race, different risks: crude + age-adjusted homicide rate by race, ethnicity, and nativity
+# pooled across 2014-2024
+homicides_race_ethnicity_age = homicides %>%
+    filter(!is.na(nativity), age_recode12 != "12") %>%
+    mutate(
+        hispanic_origin_num = as.integer(hispanic_origin),
+        race_group = case_when(
+            race_recode40 == "01" ~ "White",
+            race_recode40 == "02" ~ "Black",
+            race_recode40 == "03" ~ "AIAN",
+            race_recode40 %in% c("04","05","06","07","08","09","10","11","12","13","14") ~ "Asian or Pacific Islander",
+            race_recode40 >= "15" ~ "More than one race",
+            .default = NA_character_),
+        ethnicity_group = case_when(
+            hispanic_origin_num %in% 100:199 ~ "Non-Hispanic",
+            hispanic_origin_num %in% 200:299 ~ "Hispanic",
+            .default = NA_character_)) %>%
+    filter(!is.na(race_group), !is.na(ethnicity_group)) %>%
+    group_by(race_group, ethnicity_group, nativity, age_recode12) %>%
+    summarize(n = n(), .groups = "drop")
+
+acs_race_ethnicity_age = acs %>%
+    mutate(
+        race_num = as.integer(race),
+        hispan_num = as.integer(hispan),
+        race_group = case_when(
+            race_num == 1 ~ "White",
+            race_num == 2 ~ "Black",
+            race_num == 3 ~ "AIAN",
+            race_num %in% c(4, 5, 6) ~ "Asian or Pacific Islander",
+            race_num %in% c(8, 9) ~ "More than one race",
+            .default = NA_character_),
+        ethnicity_group = case_when(
+            hispan_num == 0 ~ "Non-Hispanic",
+            hispan_num %in% 1:4 ~ "Hispanic",
+            .default = NA_character_)) %>%
+    filter(!is.na(nativity), !is.na(age_group), !is.na(race_group), !is.na(ethnicity_group)) %>%
+    group_by(race_group, ethnicity_group, nativity, age_group) %>%
+    summarize(pop = sum(perwt), .groups = "drop")
+
+race_ethnicity_rates = homicides_race_ethnicity_age %>%
+    left_join(acs_race_ethnicity_age,
+              by = c("race_group", "ethnicity_group", "nativity", "age_recode12" = "age_group")) %>%
+    mutate(
+        rate_i = n / pop * 100000,
+        weight = standard_weights[age_recode12],
+        weighted_rate = rate_i * weight) %>%
+    group_by(race_group, ethnicity_group, nativity) %>%
+    summarize(n = sum(n), pop = sum(pop), age_adjusted_rate = sum(weighted_rate), .groups = "drop") %>%
+    mutate(
+        crude_rate = n / pop * 100000,
+        category = paste(race_group, ethnicity_group,
+                          if_else(nativity == "native", "Native-born", "Foreign-born"), sep = ", ")) %>%
+    select(category, race_group, ethnicity_group, nativity, n, pop, crude_rate, age_adjusted_rate) %>%
+    arrange(race_group, ethnicity_group, nativity)
+
+print(race_ethnicity_rates, n = Inf)
+
+write_csv(race_ethnicity_rates, "results/homicide_rates_by_race_ethnicity_nativity_pooled_2014_2024.csv")
+
+## Dumbbell chart: same race, different risks -------------------------------------------------
+dumbbell_data = race_ethnicity_rates %>%
+    mutate(group_label = paste(race_group, ethnicity_group, sep = ", ")) %>%
+    select(group_label, nativity, age_adjusted_rate) %>%
+    pivot_wider(names_from = nativity, values_from = age_adjusted_rate) %>%
+    filter(!is.na(native), !is.na(foreign)) %>%
+    mutate(
+        gap = native - foreign,
+        group_label = fct_reorder(group_label, gap))
+
+ggplot(dumbbell_data) +
+    geom_segment(aes(x = foreign, xend = native, y = group_label, yend = group_label),
+                 color = "gray70", linewidth = 1) +
+    geom_point(aes(x = native, y = group_label, color = "native"), size = 4) +
+    geom_point(aes(x = foreign, y = group_label, color = "foreign"), size = 4) +
+    scale_color_manual(values = colors_2, breaks = c("native", "foreign"),
+                        labels = c("Native-born", "Foreign-born")) +
+    labs(
+        title = "Same Race, Different Risks",
+        subtitle = "Age-adjusted homicide rate per 100,000 population, by race, ethnicity, and nativity \n Pooled 2014-2024, resident deaths, 50 states and DC",
+        x = NULL,
+        y = NULL,
+        color = NULL,
+        caption = "Source: NCHS restricted-use mortality files; ACS via IPUMS") +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(size = 30, face = "bold", hjust = 0, color = "black"),
+    plot.subtitle = element_text(size = 18, color = "gray40", hjust = 0, margin = margin(b = 12)),
+    legend.position = "top",
+    legend.justification = "left",
+    legend.text = element_text(size = 20),
+    legend.key.width = unit(1.5, "cm"),
+    panel.grid.major.y = element_blank(),
+    panel.grid.minor.x = element_blank(),
+    panel.grid.major.x = element_line(color = "gray90", linewidth = 0.5),
+    panel.grid.minor.y = element_blank(),
+    axis.line = element_blank(),
+    axis.ticks = element_blank(),
+    axis.text.x = element_text(size = 16, color = "gray40"),
+    axis.text.y = element_text(size = 16, color = "gray40"),
+    plot.caption = element_text(size = 12, color = "gray40", hjust = 0),
+    plot.caption.position = "plot",
+    plot.title.position = "plot",
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA))
+
+ggsave("results/fig.23_same_race_different_risks_dumbbell.png", width = 15, height = 10)
+
+

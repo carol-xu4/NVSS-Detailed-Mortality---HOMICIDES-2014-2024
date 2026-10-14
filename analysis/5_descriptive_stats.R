@@ -13,6 +13,20 @@ homicides = read_csv("data/output/homicides_2014_2024.csv")
 acs = readRDS("data/output/acs")
 
 # -----------------------------------------------------------------------------------------
+us_states_dc = c(
+  "AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN",
+  "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH",
+  "NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT",
+  "VT","VA","WA","WV","WI","WY")
+
+us_territories = c("PR", "VI", "GU", "AS", "MP")
+
+homicides = homicides %>%
+    mutate(nativity = case_when(
+        state_country_birth_recode %in% c(us_states_dc, us_territories) ~ "native",
+        state_country_birth_recode %in% c("CC", "MX", "CU", "YY")       ~ "foreign",
+        .default = NA_character_))
+        
 # sex
 sex_nativity_year = homicides %>%
     filter(!is.na(nativity)) %>%

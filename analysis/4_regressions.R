@@ -12,6 +12,42 @@ homicides = read_csv("data/output/homicides_2014_2024.csv")
 
 acs = readRDS("data/output/acs")
 
+acs = acs %>%
+    mutate(year = as.integer(year),
+        bpl = as.integer(bpl),
+        nativity = case_when(
+            bpl %in% c(1:56, 90, 99, 100, 105, 110, 115, 120) ~ "native",
+            bpl %in% 150:950                                  ~ "foreign",
+            .default = NA_character_))
+
+
+us_states_dc = c(
+  "AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN",
+  "IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH",
+  "NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT",
+  "VT","VA","WA","WV","WI","WY")
+
+us_territories = c("PR", "VI", "GU", "AS", "MP")
+
+homicides = homicides %>%
+    mutate(nativity = case_when(
+        state_country_birth_recode %in% c(us_states_dc, us_territories) ~ "native",
+        state_country_birth_recode %in% c("CC", "MX", "CU", "YY")       ~ "foreign",
+        .default = NA_character_))
+
+fips_to_usps = c(
+    "01" = "AL", "02" = "AK", "04" = "AZ", "05" = "AR", "06" = "CA",
+    "08" = "CO", "09" = "CT", "10" = "DE", "11" = "DC", "12" = "FL",
+    "13" = "GA", "15" = "HI", "16" = "ID", "17" = "IL", "18" = "IN",
+    "19" = "IA", "20" = "KS", "21" = "KY", "22" = "LA", "23" = "ME",
+    "24" = "MD", "25" = "MA", "26" = "MI", "27" = "MN", "28" = "MS",
+    "29" = "MO", "30" = "MT", "31" = "NE", "32" = "NV", "33" = "NH",
+    "34" = "NJ", "35" = "NM", "36" = "NY", "37" = "NC", "38" = "ND",
+    "39" = "OH", "40" = "OK", "41" = "OR", "42" = "PA", "44" = "RI",
+    "45" = "SC", "46" = "SD", "47" = "TN", "48" = "TX", "49" = "UT",
+    "50" = "VT", "51" = "VA", "53" = "WA", "54" = "WV", "55" = "WI",
+    "56" = "WY")
+
 ## ----------------------------------------------------------------------------------------
 # TWFE panel regression of each state's native-born homicide rate on its foreign-born population share
 # Numerator: homicides by state, year, nativity, age group (all 11 years) 
@@ -148,7 +184,6 @@ ggplot(fwl_data, aes(x = resid_foreign_share, y = resid_native_rate)) +
     panel.background = element_rect(fill = "white", color = NA))
 
 ggsave("results/fig.14_twfe_partial_regression_plot.png", width = 12, height = 8)
-
 
 # crude rates, state, year
 homicides_state_year_nativity = homicides %>%
@@ -309,7 +344,7 @@ ggplot(plot_data_2024, aes(x = illegal_pop, y = n)) +
     panel.background = element_rect(fill = "white", color = NA))
 
 ggplot(plot_data_2024, aes(x = illegal_share, y = age_adjusted_rate)) +
-    geom_point(color = colors_2[1], size = 2.5) +
+    geom_point(color = colors_2[1], size = 2.4) +
     ggrepel::geom_text_repel(aes(label = state_res_fips), size = 3) +
     labs(
         title = "Illegal Immigrant Share vs. Native-Born Homicide Rate by State",
@@ -332,4 +367,104 @@ ggplot(plot_data_2024, aes(x = illegal_share, y = age_adjusted_rate)) +
     plot.background = element_rect(fill = "white", color = NA),
     panel.background = element_rect(fill = "white", color = NA))
 
-ggsave("results/fig.21_illegal_immigrant_share_vs_native_homicide_rate_2024.png", width = 14, height = 9)
+ggsave("results/fig.21_illegal_immigrant_share_vs_native_homicide_rates_2024.png", width = 14, height = 9)
+
+# ---- shared theme ----
+theme_cato = theme_minimal() +
+  theme(
+    plot.title = element_text(size = 24, face = "bold", hjust = 0, color = "black"),
+    plot.subtitle = element_text(size = 14, color = "gray40", hjust = 0, margin = margin(b = 12)),
+    axis.title = element_text(size = 16, color = "gray40"),
+    axis.text = element_text(size = 14, color = "gray40"),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray90", linewidth = 0.4),
+    plot.caption = element_text(size = 10, color = "gray40", hjust = 0),
+    plot.caption.position = "plot",
+    plot.title.position = "plot",
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA))
+
+stopifnot(abs(sum(standard_weights) - 1) < 1e-6)
+
+# ---- age-adjusted homicide rate by state, for either nativity group ----
+age_adjusted_by_state = function(nat, yr = 2024) {
+  deaths = homicides %>%
+    filter(nativity == nat, data_year == yr, age_recode12 != "12") %>%
+    count(state_res_fips, age_recode12, name = "n")
+
+  acs %>%
+    filter(nativity == nat, year == yr, !is.na(age_group)) %>%
+    mutate(state = fips_to_usps[sprintf("%02d", as.integer(statefip))]) %>%
+    group_by(state, age_group) %>%
+    summarize(pop = sum(perwt), .groups = "drop") %>%
+    # start from population so age groups with zero deaths are kept
+    left_join(deaths, by = c("state" = "state_res_fips", "age_group" = "age_recode12")) %>%
+    mutate(
+      n = coalesce(n, 0L),
+      weighted_rate = n / pop * 1e5 * standard_weights[as.character(age_group)]) %>%
+    group_by(state) %>%
+    summarize(
+      n = sum(n),
+      pop = sum(pop),
+      age_adjusted_rate = sum(weighted_rate),
+      .groups = "drop") %>%
+    mutate(
+      crude_rate = n / pop * 1e5,
+      suppressed = n < 10,
+      across(c(crude_rate, age_adjusted_rate), ~ if_else(suppressed, NA_real_, .x)))
+}
+
+native_rate_2024  = age_adjusted_by_state("native")
+foreign_rate_2024 = age_adjusted_by_state("foreign")   # use your actual foreign-born label
+
+# ---- foreign-born share of TOTAL state population ----
+immig_share_2024 = acs %>%
+  filter(year == 2024) %>%
+  mutate(state = fips_to_usps[sprintf("%02d", as.integer(statefip))]) %>%
+  group_by(state) %>%
+  summarize(
+    immig_pop = sum(perwt[nativity == "foreign"]),
+    total_pop = sum(perwt),
+    .groups = "drop") %>%
+  mutate(immig_share = immig_pop / total_pop * 100)
+
+plot_data_2024 = native_rate_2024 %>%
+  left_join(immig_share_2024, by = "state")
+
+r = with(plot_data_2024, cor(immig_share, age_adjusted_rate, use = "complete.obs"))
+
+# ---- Fig: immigrant share vs native-born homicide rate ----
+fig_share = ggplot(plot_data_2024, aes(x = immig_share, y = age_adjusted_rate)) +
+  geom_smooth(method = "lm", se = FALSE, color = "gray60", linewidth = 0.6) +
+  geom_point(color = colors_2[1], size = 2.4) +
+  ggrepel::geom_text_repel(aes(label = state), size = 3) +
+  labs(
+    title = "Immigrant Share vs. Native-Born Homicide Rate by State",
+    subtitle = sprintf("2024, age-adjusted rate per 100,000 native-born population (r = %.2f)", r),
+    x = "Immigrants as % of state population",
+    y = "Age-adjusted native-born homicide rate per 100,000",
+    caption = "Sources: NCHS restricted-use mortality files; American Community Survey. Rates age-adjusted to the 2000 US standard population.") +
+  theme_cato
+
+ggsave("results/fig.22_immigrant_share_vs_native_homicide_rates_2024.png",
+       fig_share, width = 14, height = 9)
+
+# ---- Optional Fig: immigrant vs native age-adjusted rate, by state ----
+compare_2024 = native_rate_2024 %>%
+  select(state, native_rate = age_adjusted_rate) %>%
+  inner_join(foreign_rate_2024 %>% select(state, foreign_rate = age_adjusted_rate), by = "state") %>%
+  filter(!is.na(native_rate), !is.na(foreign_rate))
+
+fig_compare = ggplot(compare_2024, aes(x = native_rate, y = foreign_rate)) +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "gray60") +
+  geom_point(color = colors_2[1], size = 2.4) +
+  ggrepel::geom_text_repel(aes(label = state), size = 3) +
+  coord_equal() +
+  labs(
+    title = "Immigrant vs. Native-Born Homicide Rates by State",
+    subtitle = "2024, age-adjusted per 100,000. States below the line: immigrants killed at lower rates",
+    x = "Native-born rate", y = "Immigrant rate") +
+  theme_cato
+
+ggsave("results/fig.23_immigrant_vs_native_homicide_rates_by_state_2024.png",
+       fig_compare, width = 10, height = 10)
